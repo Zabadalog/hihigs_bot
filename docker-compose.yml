@@ -4,5 +4,7 @@ services:
   bot:
     container_name: telegram_bot
     build:
-      env_file
+      context: .
+    env_file:
+      - .env
     restart: unless-stopped
