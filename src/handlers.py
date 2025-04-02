@@ -55,5 +55,23 @@ async def button_status(message: types.Message):
 
 @router.message(F.text == "Помощь")
 async def button_help(message: types.Message):
-    logging.info(f"Нажата кнопка 'Помощь' от @{message.from_user.username}")
+    logging.info(f"Нажата кнопка ' Помощь' от @{message.from_user.username}")
     await process_help_command(message)
+
+
+@router.message(F.text.contains("кнопка"))
+async def inline_btn(message: types.Message):
+    logging.info(f"Показ inline-кнопки для @{message.from_user.username}")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Нажми меня", callback_data="button_pressed")
+    await message.answer("Инлайн-кнопка:", reply_markup=builder.as_markup())
+
+
+@router.message()
+async def echo(message: types.Message):
+    logging.info(f"Эхо от @{message.from_user.username}: {message.text}")
+    await message.answer("Неизвестная команда")
+
+
+def register_message_handlers(dp):
+    dp.include_router(router)
