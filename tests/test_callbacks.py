@@ -33,5 +33,4 @@ async def test_on_button_pressed():
     assert cb.answer_called
     assert cb._answer_text == "Кнопка нажата"
     assert cb._message_answer == "Обработка выполнена"
-    
-    
+
