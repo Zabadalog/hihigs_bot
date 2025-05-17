@@ -37,7 +37,7 @@ async def role_chosen(message: types.Message, state: FSMContext):
 
         # Если запись есть и у неё уже стоит роль (tutorcode или subscribe) — блокируем
         if user_obj and (user_obj.tutorcode or user_obj.subscribe):
-            await message.answer("❗ Вы уже зарегистрированы.", reply_markup=types.ReplyKeyboardRemove())
+            await message.answer("Вы уже зарегистрированы.", reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
             return
 
@@ -52,7 +52,7 @@ async def role_chosen(message: types.Message, state: FSMContext):
             await session.commit()
 
             await message.answer(
-                f"✅ Вы преподаватель. Ваш код: `{code}`",
+                f" Вы преподаватель. Ваш код: `{code}`",
                 parse_mode="Markdown",
                 reply_markup=types.ReplyKeyboardRemove()
             )
@@ -60,11 +60,11 @@ async def role_chosen(message: types.Message, state: FSMContext):
 
         elif role == "слушатель":
             # никак не проверяем existing здесь — просто просим ввести код
-            await message.answer("📝 Введите код преподавателя:")
+            await message.answer(" Введите код преподавателя:")
             await state.set_state(Register.entering_code)
 
         else:
-            await message.answer("⚠️ Пожалуйста, нажмите одну из кнопок.")
+            await message.answer(" Пожалуйста, нажмите одну из кнопок.")
 
 @router.message(Register.entering_code)
 async def code_entered(message: types.Message, state: FSMContext):
@@ -87,18 +87,18 @@ async def code_entered(message: types.Message, state: FSMContext):
                 session.add(User(user_id=uid, username=uname, subscribe=tutor.user_id))
             await session.commit()
 
-            await message.answer(f"🎓 Вы слушатель @{tutor.username}",
+            await message.answer(f" Вы слушатель @{tutor.username}",
                                  reply_markup=types.ReplyKeyboardRemove())
             await state.clear()
         else:
-            await message.answer("❌ Неверный код, попробуйте ещё раз:")
+            await message.answer("Неверный код, попробуйте ещё раз:")
 
 @router.message(Command("status"))
 async def cmd_status(message: types.Message, state: FSMContext):
     # 1) проверяем, не в процессе ли регистрация/смена роли
     current = await state.get_state()
     if current is not None:
-        await message.answer("🔄 Вы сейчас в процессе смены роли — сначала выберите роль или введите код преподавателя.")
+        await message.answer("Вы сейчас в процессе смены роли — сначала выберите роль или введите код преподавателя.")
         return
 
     # 2) обычная логика
@@ -107,15 +107,15 @@ async def cmd_status(message: types.Message, state: FSMContext):
         user = result.scalar_one_or_none()
 
         if not user:
-            await message.answer("❗ Вы не зарегистрированы. Нажмите /start")
+            await message.answer("Вы не зарегистрированы. Нажмите /start")
             return
 
         if user.tutorcode:
             await message.answer(
-                f"👨‍🏫 Вы — преподаватель\n"
-                f"🆔 ID: {user.user_id}\n"
-                f"📛 Username: @{user.username or 'не задан'}\n"
-                f"🔑 Код для студентов: `{user.tutorcode}`",
+                f"Вы — преподаватель\n"
+                f"ID: {user.user_id}\n"
+                f"Username: @{user.username or 'не задан'}\n"
+                f"Код для студентов: `{user.tutorcode}`",
                 parse_mode="Markdown"
             )
         elif user.subscribe:
@@ -123,15 +123,15 @@ async def cmd_status(message: types.Message, state: FSMContext):
             teacher = result2.scalar_one_or_none()
             if teacher:
                 await message.answer(
-                    f"🎓 Вы — слушатель\n"
-                    f"🆔 ID: {user.user_id}\n"
-                    f"📛 Username: @{user.username or 'не задан'}\n"
-                    f"👨‍🏫 Подписаны на: @{teacher.username or 'не задан'}"
+                    f"Вы — слушатель\n"
+                    f"ID: {user.user_id}\n"
+                    f"Username: @{user.username or 'не задан'}\n"
+                    f"Подписаны на: @{teacher.username or 'не задан'}"
                 )
             else:
-                await message.answer(f"🎓 Вы слушатель, но преподаватель с ID {user.subscribe} не найден.")
+                await message.answer(f"Вы слушатель, но преподаватель с ID {user.subscribe} не найден.")
         else:
-            await message.answer("ℹ️ Невозможно определить ваш статус.")
+            await message.answer("ℹ Невозможно определить ваш статус.")
 
 @router.message(Command("help"))
 async def cmd_help(message: types.Message):
