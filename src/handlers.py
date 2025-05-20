@@ -1,77 +1,166 @@
-import logging
-from aiogram import types, Router, F
+# src/handlers.py
+import uuid
+from aiogram import Router, F, types
 from aiogram.filters import Command
-from .keyboard import keyboard
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from sqlalchemy.future import select
+from models import User, async_session  # models.py в корне
 
 router = Router()
 
-
-async def process_start_command(message: types.Message):
-    logging.info(f"/start от @{message.from_user.username} ({message.from_user.id})")
-    await message.answer(
-        f"Привет, {message.from_user.first_name}!",
-        reply_markup=keyboard
-    )
-
-
-async def process_help_command(message: types.Message):
-    logging.info(f"/help от @{message.from_user.username} ({message.from_user.id})")
-    await message.answer(
-        "/start – запуск бота\n"
-        "/help – справка\n"
-        "/status – информация о пользователе"
-    )
-
-
-async def process_status_command(message: types.Message):
-    logging.info(f"/status от @{message.from_user.username} ({message.from_user.id})")
-    await message.answer(
-        f"ID: {message.from_user.id}\n"
-        f"Username: @{message.from_user.username or 'не указан'}"
-    )
-
+class Register(StatesGroup):
+    choosing_role = State()
+    entering_code  = State()
 
 @router.message(Command("start"))
-async def handle_start(message: types.Message):
-    await process_start_command(message)
+async def cmd_start(message: types.Message, state: FSMContext):
+    kb = types.ReplyKeyboardMarkup(
+        keyboard=[
+            [types.KeyboardButton(text="Преподаватель")],
+            [types.KeyboardButton(text="Слушатель")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("Вы преподаватель или слушатель?", reply_markup=kb)
+    await state.set_state(Register.choosing_role)
 
+@router.message(Register.choosing_role)
+async def role_chosen(message: types.Message, state: FSMContext):
+    role = message.text.lower()
+    uid  = message.from_user.id
+    uname = message.from_user.username or "unknown"
 
-@router.message(Command("help"))
-async def handle_help(message: types.Message):
-    await process_help_command(message)
+    async with async_session() as session:
+        res = await session.execute(select(User).where(User.user_id == uid))
+        user_obj = res.scalar_one_or_none()
 
+        # Если запись есть и у неё уже стоит роль (tutorcode или subscribe) — блокируем
+        if user_obj and (user_obj.tutorcode or user_obj.subscribe):
+            await message.answer("Вы уже зарегистрированы.", reply_markup=types.ReplyKeyboardRemove())
+            await state.clear()
+            return
+
+        # Иначе — регистрируем в зависимости от выбора
+        if role == "преподаватель":
+            code = str(uuid.uuid4())[:8]
+            if user_obj:
+                user_obj.tutorcode = code
+                user_obj.subscribe = None
+            else:
+                session.add(User(user_id=uid, username=uname, tutorcode=code))
+            await session.commit()
+
+            await message.answer(
+                f" Вы преподаватель. Ваш код: `{code}`",
+                parse_mode="Markdown",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+            await state.clear()
+
+        elif role == "слушатель":
+            # никак не проверяем existing здесь — просто просим ввести код
+            await message.answer(" Введите код преподавателя:")
+            await state.set_state(Register.entering_code)
+
+        else:
+            await message.answer(" Пожалуйста, нажмите одну из кнопок.")
+
+@router.message(Register.entering_code)
+async def code_entered(message: types.Message, state: FSMContext):
+    code = message.text.strip()
+    uid  = message.from_user.id
+    uname = message.from_user.username or "unknown"
+
+    async with async_session() as session:
+        res = await session.execute(select(User).where(User.tutorcode == code))
+        tutor = res.scalar_one_or_none()
+
+        if tutor:
+            # создаём или обновляем слушателя
+            res2 = await session.execute(select(User).where(User.user_id == uid))
+            user_obj = res2.scalar_one_or_none()
+            if user_obj:
+                user_obj.subscribe = tutor.user_id
+                user_obj.tutorcode = None
+            else:
+                session.add(User(user_id=uid, username=uname, subscribe=tutor.user_id))
+            await session.commit()
+
+            await message.answer(f" Вы слушатель @{tutor.username}",
+                                 reply_markup=types.ReplyKeyboardRemove())
+            await state.clear()
+        else:
+            await message.answer("Неверный код, попробуйте ещё раз:")
 
 @router.message(Command("status"))
-async def handle_status(message: types.Message):
-    await process_status_command(message)
+async def cmd_status(message: types.Message, state: FSMContext):
+    # 1) проверяем, не в процессе ли регистрация/смена роли
+    current = await state.get_state()
+    if current is not None:
+        await message.answer("Вы сейчас в процессе смены роли — сначала выберите роль или введите код преподавателя.")
+        return
 
+    # 2) обычная логика
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.user_id == message.from_user.id))
+        user = result.scalar_one_or_none()
 
-@router.message(F.text == "Статус")
-async def button_status(message: types.Message):
-    logging.info(f"Нажата кнопка 'Статус' от @{message.from_user.username}")
-    await process_status_command(message)
+        if not user:
+            await message.answer("Вы не зарегистрированы. Нажмите /start")
+            return
 
+        if user.tutorcode:
+            await message.answer(
+                f"Вы — преподаватель\n"
+                f"ID: {user.user_id}\n"
+                f"Username: @{user.username or 'не задан'}\n"
+                f"Код для студентов: `{user.tutorcode}`",
+                parse_mode="Markdown"
+            )
+        elif user.subscribe:
+            result2 = await session.execute(select(User).where(User.user_id == user.subscribe))
+            teacher = result2.scalar_one_or_none()
+            if teacher:
+                await message.answer(
+                    f"Вы — слушатель\n"
+                    f"ID: {user.user_id}\n"
+                    f"Username: @{user.username or 'не задан'}\n"
+                    f"Подписаны на: @{teacher.username or 'не задан'}"
+                )
+            else:
+                await message.answer(f"Вы слушатель, но преподаватель с ID {user.subscribe} не найден.")
+        else:
+            await message.answer("ℹ Невозможно определить ваш статус.")
 
-@router.message(F.text == "Помощь")
-async def button_help(message: types.Message):
-    logging.info(f"Нажата кнопка ' Помощь' от @{message.from_user.username}")
-    await process_help_command(message)
+@router.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer(
+        "/start – регистрация\n"
+        "/status – узнать ваш статус\n"
+        "/change_role – сменить роль\n"
+        "/help – это сообщение"
+    )
+@router.message(Command("change_role"))
+async def cmd_change_role(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
 
+    # Очищаем старую роль в БД
+    async with async_session() as session:
+        res = await session.execute(select(User).where(User.user_id == user_id))
+        user_obj = res.scalar_one_or_none()
+        if user_obj:
+            user_obj.tutorcode = None
+            user_obj.subscribe = None
+            await session.commit()
 
-@router.message(F.text.contains("кнопка"))
-async def inline_btn(message: types.Message):
-    logging.info(f"Показ inline-кнопки для @{message.from_user.username}")
-    builder = InlineKeyboardBuilder()
-    builder.button(text="Нажми меня", callback_data="button_pressed")
-    await message.answer("Инлайн-кнопка:", reply_markup=builder.as_markup())
-
-
-@router.message()
-async def echo(message: types.Message):
-    logging.info(f"Эхо от @{message.from_user.username}: {message.text}")
-    await message.answer("Неизвестная команда")
-
-
-def register_message_handlers(dp):
-    dp.include_router(router)
+    # Открываем выбор новой роли
+    kb = types.ReplyKeyboardMarkup(
+        keyboard=[
+            [types.KeyboardButton(text="Преподаватель")],
+            [types.KeyboardButton(text="Слушатель")],
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("Выберите новую роль:", reply_markup=kb)
+    await state.set_state(Register.choosing_role)
