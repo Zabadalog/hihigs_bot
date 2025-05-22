@@ -1,24 +1,20 @@
-from sqlalchemy import Column, String
+from sqlalchemy import Column, Integer, VARCHAR, Text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy.orm import declarative_base, sessionmaker
 
-# Настройки базы данных
-DATABASE_URL = "sqlite+aiosqlite:///./users.db"
-
-engine = create_async_engine(DATABASE_URL, echo=False)
-Base = declarative_base()
+DATABASE_URL = "sqlite+aiosqlite:///./hihigs.db"
+engine = create_async_engine(DATABASE_URL, echo=True)
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+Base = declarative_base()
 
-# Модель пользователя
 class User(Base):
-    __tablename__ = 'users'
-    userid = Column(String, primary_key=True)
-    username = Column(String)
-    tutorcode = Column(String, nullable=True)
-    subscribe = Column(String, nullable=True)
-    extra = Column(String, nullable=True)
+    __tablename__ = "user_table"
+    user_id   = Column(Integer, primary_key=True)
+    username  = Column(VARCHAR(255), nullable=False)
+    tutorcode = Column(VARCHAR(8), unique=True, nullable=True)
+    subscribe = Column(Integer, nullable=True)
+    extra     = Column(Text, nullable=True)
 
-# Инициализация базы данных
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
